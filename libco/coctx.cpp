@@ -87,31 +87,42 @@ extern "C"
 {
 	extern void coctx_swap( coctx_t *,coctx_t* ) asm("coctx_swap");
 };
-#if defined(__i386__)
+#if defined(__i386__)//对于32系统
 int coctx_init( coctx_t *ctx )
 {
 	memset( ctx,0,sizeof(*ctx));
 	return 0;
 }
+/*
+params ctx  首次运行的协程用来上下文的地方
+params  pfn  协程的工作函数
+params  s   协程控制块
+*/
+//首次调用时，需要初始化regs
 int coctx_make( coctx_t *ctx,coctx_pfn_t pfn,const void *s,const void *s1 )
 {
 	//make room for coctx_param
 	char *sp = ctx->ss_sp + ctx->ss_size - sizeof(coctx_param_t);
 	sp = (char*)((unsigned long)sp & -16L);
 
-	
+	//
 	coctx_param_t* param = (coctx_param_t*)sp ;
+	//
 	param->s1 = s;
 	param->s2 = s1;
 
+	//对regs清0
 	memset(ctx->regs, 0, sizeof(ctx->regs));
 
+	//regs[7]存的是栈顶指针
 	ctx->regs[ kESP ] = (char*)(sp) - sizeof(void*);
+	//regs[0]存的是返回地址，这里被初始化为协程运行函数的函数指针
 	ctx->regs[ kEIP ] = (char*)pfn;
 
 	return 0;
 }
 #elif defined(__x86_64__)
+//同理，但是对于64位系统，regs[13]保存栈顶指针，regs[9]保存返回地址
 int coctx_make( coctx_t *ctx,coctx_pfn_t pfn,const void *s,const void *s1 )
 {
 	char *sp = ctx->ss_sp + ctx->ss_size;
@@ -130,6 +141,7 @@ int coctx_make( coctx_t *ctx,coctx_pfn_t pfn,const void *s,const void *s1 )
 
 int coctx_init( coctx_t *ctx )
 {
+	//将ctx清0
 	memset( ctx,0,sizeof(*ctx));
 	return 0;
 }

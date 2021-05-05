@@ -30,12 +30,16 @@
 
 #include <sys/epoll.h>
 
+/*
+epoll_wait返回结果存在这里
+*/
 struct co_epoll_res
 {
 	int size;
 	struct epoll_event *events;
 	struct kevent *eventlist;
 };
+
 int 	co_epoll_wait( int epfd,struct co_epoll_res *events,int maxevents,int timeout );
 int 	co_epoll_ctl( int epfd,int op,int fd,struct epoll_event * );
 int 	co_epoll_create( int size );

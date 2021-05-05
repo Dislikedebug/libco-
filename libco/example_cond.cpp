@@ -22,10 +22,12 @@
 #include <queue>
 #include "co_routine.h"
 using namespace std;
+
 struct stTask_t
 {
 	int id;
 };
+
 struct stEnv_t
 {
 	stCoCond_t* cond;
@@ -44,7 +46,8 @@ void* Producer(void* args)
 		env->task_queue.push(task);
 		printf("%s:%d produce task %d\n", __func__, __LINE__, task->id);
 		co_cond_signal(env->cond);
-		poll(NULL, 0, 3000);
+		//调用poll,调用poll,处理就绪事件
+		poll(NULL, 0, 1000);
 	}
 	return NULL;//每3秒都会执行一次，先打印printf，再执行这里；
 }
@@ -56,6 +59,7 @@ void* Consumer(void* args)
 	{
 		if (env->task_queue.empty())
 		{
+			//
 			co_cond_timedwait(env->cond, -1);
 			continue;
 		}
@@ -68,7 +72,9 @@ void* Consumer(void* args)
 }
 int main()
 {
+	//env为运行函数参数，
 	stEnv_t* env = new stEnv_t;
+	//申请一个条件变量链表
 	env->cond = co_cond_alloc();
 
 	stCoRoutine_t* consumer_routine;

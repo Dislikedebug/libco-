@@ -22,12 +22,12 @@
 #endif
 coctx_swap:
 
-#if defined(__i386__)
-	leal 4(%esp), %eax //sp 
-	movl 4(%esp), %esp 
-	leal 32(%esp), %esp //parm a : &regs[7] + sizeof(void*)
+#if defined(__i386__)//对于32系统
+	leal 4(%esp), %eax //直接寻址   eax存放的栈顶
+	movl 4(%esp), %esp //间接寻址，esp存的是current协程 coctx_t指针 参数a
+	leal 32(%esp), %esp //esp存的是ss_size成员地址处
 
-	pushl %eax //esp ->parm a 
+	pushl %eax   //regs[7]保存栈顶指针
 
 	pushl %ebp
 	pushl %esi
@@ -35,22 +35,23 @@ coctx_swap:
 	pushl %edx
 	pushl %ecx
 	pushl %ebx
-	pushl -4(%eax)
+	pushl -4(%eax)  //regs[0]存放返回地址
 
 	
-	movl 4(%eax), %esp //parm b -> &regs[0]
+	movl 4(%eax), %esp //parm b -> &regs[0]      得到新的协程存放上下文栈地址
 
-	popl %eax  //ret func addr
+	popl %eax  //ret func addr  r  egs[0]加载eax得到返回地址
 	popl %ebx  
 	popl %ecx
 	popl %edx
 	popl %edi
 	popl %esi
 	popl %ebp
-	popl %esp
-	pushl %eax //set ret func addr
+	popl %esp   //regs[7]加载到esp，得到新的栈顶指针
 
-	xorl %eax, %eax
+	pushl %eax //set ret func addr  将新的返回地址压栈，至此，完全恢复新协程的上下文
+
+	xorl %eax, %eax   //清除eax
 	ret
 
 #elif defined(__x86_64__)                    // 该函数调用之前，rip（返回地址）会被压栈，所以rsp此时指向返回地址

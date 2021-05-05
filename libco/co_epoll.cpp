@@ -27,6 +27,7 @@
 
 int	co_epoll_wait( int epfd,struct co_epoll_res *events,int maxevents,int timeout )
 {
+	//非阻塞
 	return epoll_wait( epfd,events->events,maxevents,timeout );
 }
 int	co_epoll_ctl( int epfd,int op,int fd,struct epoll_event * ev )

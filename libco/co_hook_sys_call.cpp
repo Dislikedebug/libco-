@@ -213,14 +213,19 @@ static inline void free_by_fd( int fd )
 	return;
 
 }
+
 int socket(int domain, int type, int protocol)
 {
+	//将原socket函数地址重命名为g_sys_socket_func
 	HOOK_SYS_FUNC( socket );
 
+	//没有开启hook机制，直接调用系统原socket
 	if( !co_is_enable_sys_hook() )
 	{
 		return g_sys_socket_func( domain,type,protocol );
 	}
+
+	//否在在调用socket基础上
 	int fd = g_sys_socket_func(domain,type,protocol);
 	if( fd < 0 )
 	{
@@ -229,14 +234,16 @@ int socket(int domain, int type, int protocol)
 
 	rpchook_t *lp = alloc_by_fd( fd );
 	lp->domain = domain;
-	
+	//fctl是本地写的，会自动设为非阻塞，g_sys_fcntl_func是源fcntl
 	fcntl( fd, F_SETFL, g_sys_fcntl_func(fd, F_GETFL,0 ) );
 
 	return fd;
 }
 
+//疑问：accept没有hook机制  ？
 int co_accept( int fd, struct sockaddr *addr, socklen_t *len )
 {
+	//这个accept是原系统api
 	int cli = accept( fd,addr,len );
 	if( cli < 0 )
 	{
@@ -245,6 +252,8 @@ int co_accept( int fd, struct sockaddr *addr, socklen_t *len )
 	alloc_by_fd( cli );
 	return cli;
 }
+
+//
 int connect(int fd, const struct sockaddr *address, socklen_t address_len)
 {
 	HOOK_SYS_FUNC( connect );
@@ -327,21 +336,30 @@ int close(int fd)
 
 	return ret;
 }
+
+//
 ssize_t read( int fd, void *buf, size_t nbyte )
 {
 	HOOK_SYS_FUNC( read );
 	
+	//没有开启hook机制，直接调用原 read  api
 	if( !co_is_enable_sys_hook() )
 	{
 		return g_sys_read_func( fd,buf,nbyte );
 	}
 	rpchook_t *lp = get_by_fd( fd );
 
+	//开启hook,  但fd被用户设为非阻塞，也是直接调用原read  api
 	if( !lp || ( O_NONBLOCK & lp->user_flag ) ) 
 	{
 		ssize_t ret = g_sys_read_func( fd,buf,nbyte );
 		return ret;
 	}
+
+	/*
+	开启hook,且fd被用户为阻塞时   (实际上通过fctl也改成非阻塞了)：
+	需要i加入到epoll 事件表中，并切到其他协程执行，给用户造成  "阻塞" 假象
+	*/
 	int timeout = ( lp->read_timeout.tv_sec * 1000 ) 
 				+ ( lp->read_timeout.tv_usec / 1000 );
 
@@ -349,6 +367,7 @@ ssize_t read( int fd, void *buf, size_t nbyte )
 	pf.fd = fd;
 	pf.events = ( POLLIN | POLLERR | POLLHUP );
 
+	//调用本地poll，实际是基于epoll实现   ，此时会阻塞，切换到其他协程执行，直到fd可读，被唤醒返回  
 	int pollret = poll( &pf,1,timeout );
 
 	ssize_t readret = g_sys_read_func( fd,(char*)buf ,nbyte );
@@ -362,6 +381,8 @@ ssize_t read( int fd, void *buf, size_t nbyte )
 	return readret;
 	
 }
+
+
 ssize_t write( int fd, const void *buf, size_t nbyte )
 {
 	HOOK_SYS_FUNC( write );
@@ -415,6 +436,7 @@ ssize_t write( int fd, const void *buf, size_t nbyte )
 	return wrotelen;
 }
 
+//
 ssize_t sendto(int socket, const void *message, size_t length,
 	                 int flags, const struct sockaddr *dest_addr,
 					               socklen_t dest_len)
@@ -427,17 +449,21 @@ ssize_t sendto(int socket, const void *message, size_t length,
 		5.try
 	*/
 	HOOK_SYS_FUNC( sendto );
+	//没有开启hook机制
 	if( !co_is_enable_sys_hook() )
 	{
 		return g_sys_sendto_func( socket,message,length,flags,dest_addr,dest_len );
 	}
 
 	rpchook_t *lp = get_by_fd( socket );
+
+	//开启hook机制，但被用户设为非阻塞
 	if( !lp || ( O_NONBLOCK & lp->user_flag ) )
 	{
 		return g_sys_sendto_func( socket,message,length,flags,dest_addr,dest_len );
 	}
 
+	//
 	ssize_t ret = g_sys_sendto_func( socket,message,length,flags,dest_addr,dest_len );
 	if( ret < 0 && EAGAIN == errno )
 	{
@@ -573,19 +599,22 @@ ssize_t recv( int socket, void *buffer, size_t length, int flags )
 
 extern int co_poll_inner( stCoEpoll_t *ctx,struct pollfd fds[], nfds_t nfds, int timeout, poll_pfn_t pollfunc);
 
+
 int poll(struct pollfd fds[], nfds_t nfds, int timeout)
 {
 
 	HOOK_SYS_FUNC( poll );
 
+	//没有开启hook机制，调用原poll函数
 	if( !co_is_enable_sys_hook() )
 	{
 		return g_sys_poll_func( fds,nfds,timeout );
 	}
-
+	//否则调用本地写的co_poll_inner，基于epoll +  定时器  实现
 	return co_poll_inner( co_get_epoll_ct(),fds,nfds,timeout, g_sys_poll_func);
 
 }
+
 int setsockopt(int fd, int level, int option_name,
 			                 const void *option_value, socklen_t option_len)
 {
@@ -954,8 +983,8 @@ struct hostent *co_gethostbyname(const char *name)
 }
 #endif
 
-
-void co_enable_hook_sys() //�⺯������������,�����ļ��ᱻ���ԣ�����
+//打开hook机制
+void co_enable_hook_sys() //�⺯������������,�����ļ��ᱻ���ԣ�����
 {
 	stCoRoutine_t *co = GetCurrThreadCo();
 	if( co )
